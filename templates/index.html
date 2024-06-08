@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hotel Recommendations</title>
+    <style>
+        .hotels-container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .hotel-card {
+            border: 1px solid #ccc;
+            padding: 16px;
+            margin: 16px;
+            border-radius: 8px;
+            flex: 1 1 calc(25% - 32px); /* 4 hotels per row */
+            box-sizing: border-box;
+            transition: transform 0.3s, box-shadow 0.3s;
+            max-width: calc(25% - 32px);
+        }
+        .hotel-card:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+        .hotel-card img {
+            max-width: 100%;
+            height: auto;
+            cursor: pointer;
+        }
+        .buttons {
+            display: flex;
+            justify-content: space-between;
+        }
+        .like-btn, .dislike-btn {
+            cursor: pointer;
+            font-size: 24px;
+            margin: 0 10px;
+        }
+        .map-icon {
+            cursor: pointer;
+            font-size: 24px;
+            margin-left: 10px;
+        }
+        #map {
+            height: 400px;
+            width: 100%;
+        }
+    </style>
+    <script src="https://openapi.map.naver.com/openapi/v3/maps.js?ncpClientId=YOUR_NAVER_CLIENT_ID"></script>
+</head>
+<body>
+    <h1>Hotel Recommendations</h1>
+    <button onclick="fetchRecommendations()">Get Recommendations</button>
+    <button onclick="sortHotels('lowToHigh')">Low to High Price</button>
+    <button onclick="sortHotels('highToLow')">High to Low Price</button>
+    <button onclick="showPersonalizedForm()">Personalized Recommendations</button>
+    <div id="personalized-form" style="display: none;">
+        <h2>Enter Your Preferences</h2>
+        <label for="min-price">Min Price:</label>
+        <input type="number" id="min-price">
+        <label for="max-price">Max Price:</label>
+        <input type="number" id="max-price">
+        <label for="star-rating">Star Rating:</label>
+        <input type="number" id="star-rating" min="1" max="5">
+        <button onclick="getPersonalizedRecommendations()">Get Personalized Recommendations</button>
+    </div>
+    <div class="hotels-container" id="hotels"></div>
+    <div id="map"></div>
+
+    <script>
+        let map, userMarker;
+        let hotelsData = [];
+        let likedHotelPrice = null;
+
+        function initMap() {
+            map = new naver.maps.Map('map', {
+                center: new naver.maps.LatLng(37.5665, 126.9780),
+                zoom: 10
+            });
+
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(function(position) {
+                    const pos = new naver.maps.LatLng(position.coords.latitude, position.coords.longitude);
+                    map.setCenter(pos);
+
+                    userMarker = new naver.maps.Marker({
+                        position: pos,
+                        map: map,
+                        title: 'Your location'
+                    });
+                });
+            }
+        }
+
+        function fetchRecommendations() {
+            fetch('/get_recommendations')
+                .then(response => response.json())
+                .then(data => {
+                    hotelsData = data;
+                    displayHotels(hotelsData);
+                })
+                .catch(error => {
+                    console.error('Error fetching recommendations:', error);
+                });
+        }
+
+        function displayHotels(hotels) {
+            const hotelsDiv = document.getElementById('hotels');
+            hotelsDiv.innerHTML = '';
+            hotels.forEach(hotel => {
+                const hotelCard = document.createElement('div');
+                hotelCard.className = 'hotel-card';
+                hotelCard.innerHTML = `
+                    <h2>${hotel.name}</h2>
+                    <img src="${hotel.thumbnail}" alt="${hotel.name}" onclick="goToHotelDetail('${hotel.hotel_id}')">
+                    <p>City: ${hotel.city}</p>
+                    <p>Price: $${hotel.price.value}</p>
+                    <p>Rating: ${hotel.rating.value} (${hotel.rating.count} reviews)</p>
+                    <p>Distance: ${hotel.distance} km</p>
+                    <p>Phone: ${hotel.phone}</p>
+                    <p>Stars: ${hotel.star}</p>
+                    <p>Amenities: ${hotel.top_amenities.join(', ')}</p>
+                    <button onclick="showRoute(${hotel.location.lat}, ${hotel.location.lng})">Show Route</button>
+                    <div class="buttons">
+                        <span class="like-btn" onclick="likeHotel(${hotel.price.value})">👍</span>
+                        <span class="dislike-btn" onclick="dislikeHotel(${hotel.hotel_id})">👎</span>
+                        <span class="map-icon" onclick="openNaverMap(${hotel.location.lat}, ${hotel.location.lng})">📍</span>
+                    </div>
+                    <a href="${hotel.book_url}" target="_blank" rel="noopener noreferrer">Book Now</a>
+                `;
+                hotelsDiv.appendChild(hotelCard);
+            });
+        }
+
+        function sortHotels(order) {
+            const sortedHotels = [...hotelsData].sort((a, b) => {
+                if (order === 'lowToHigh') {
+                    return a.price.value - b.price.value;
+                } else if (order === 'highToLow') {
+                    return b.price.value - a.price.value;
+                }
+            });
+            displayHotels(sortedHotels);
+        }
+
+        function showRoute(lat, lng) {
+            if (userMarker) {
+                const userPos = userMarker.getPosition();
+                const hotelPos = new naver.maps.LatLng(lat, lng);
+
+                const polyline = new naver.maps.Polyline({
+                    map: map,
+                    path: [userPos, hotelPos],
+                    strokeColor: '#5347AA',
+                    strokeWeight: 6
+                });
+
+                map.setCenter(hotelPos);
+            } else {
+                alert('Your location is not available.');
+            }
+        }
+
+        function goToHotelDetail(hotelId) {
+            window.location.href = `/hotel/${hotelId}`;
+        }
+
+        function likeHotel(price) {
+            likedHotelPrice = price;
+            const cheaperHotels = hotelsData.filter(hotel => hotel.price.value < likedHotelPrice);
+            displayHotels(cheaperHotels);
+        }
+
+        function dislikeHotel(hotelId) {
+            alert('You disliked the hotel.');
+        }
+
+        function openNaverMap(lat, lng) {
+            const userPos = userMarker.getPosition();
+            const url = `https://map.naver.com/v5/directions/${userPos.lat},${userPos.lng}/${lat},${lng}?c=14128572.1598196,4501350.8438609,15,0,0,0,dh`;
+            window.open(url, '_blank');
+        }
+
+        function showPersonalizedForm() {
+            document.getElementById('personalized-form').style.display = 'block';
+        }
+
+        function getPersonalizedRecommendations() {
+            const minPrice = parseFloat(document.getElementById('min-price').value);
+            const maxPrice = parseFloat(document.getElementById('max-price').value);
+            const starRating = parseInt(document.getElementById('star-rating').value);
+
+            const filteredHotels = hotelsData.filter(hotel => 
+                hotel.price.value >= minPrice && 
+                hotel.price.value <= maxPrice && 
+                hotel.star === starRating
+            );
+
+            displayHotels(filteredHotels);
+        }
+
+        window.onload = initMap;
+    </script>
+</body>
+</html>
